@@ -1,0 +1,145 @@
+---
+title: "The First Project"
+author: "Ekaterina Kravchuk"
+date: "05 11 2021"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Olimpic games
+
+Working with data on Olympic Games participants over the past 120 years
+
+## 0. Installing packages
+
+```{r}
+libraries <- c("skimr", "dplyr")
+loading_libraries <- function(libraries) {
+  installed_libraries <- libraries %in% rownames(installed.packages())
+  if (any(installed_libraries == FALSE)) {
+  install.packages(libraries[!installed_libraries])
+    }
+  invisible(lapply(libraries, library, character.only = TRUE))
+}
+loading_libraries(libraries)
+```
+
+## 1. Getting the data
+
+A function for combining observations into one table
+
+```{r, echo=TRUE}
+getting_data <- function(path, type ) {
+  all_files <- list.files(path, pattern = type, full.names = TRUE)
+  listed_files <- lapply(all_files, read.csv)
+  dataset <- lapply(listed_files, rbind)  
+  do.call(rbind.data.frame, dataset)
+}
+
+olympic_data_table <- getting_data('~/data', '.csv')
+```
+## 2. Data correction
+
+```{r, echo=TRUE}
+str(olympic_data_table)
+```
+We have 271115 obs. of  15 variables
+```{r, echo = TRUE}
+library(skimr)
+skim(olympic_data_table)
+
+```
+Let's replace empty strings with NA:
+
+```{r}
+olympic_tidy_data <- olympic_data_table %>% replace(. == "", NA)
+```
+Let's remove the column 'Games', we have the same information in 'Year' and 'Season'
+
+```{r}
+olympic_tidy_data$Games = NULL
+```
+Let's make 'Sex' and 'Medal', 'Season' factors
+```{r, echo = TRUE}
+unique(olympic_tidy_data$Sex)
+```
+What does 'G' mean?
+```{r, echo = TRUE}
+subset(olympic_tidy_data, olympic_tidy_data$Sex == "G" | is.na(olympic_tidy_data$Sex))
+```
+We see male names. Let's replace 'G' with 'M'
+```{r}
+olympic_tidy_data$Sex = replace(olympic_tidy_data$Sex, olympic_tidy_data$Sex == "G", "M")
+olympic_tidy_data$Sex = as.factor(olympic_tidy_data$Sex)
+```
+```{r, echo = TRUE}
+unique(olympic_tidy_data$Season)
+```
+```{r}
+olympic_tidy_data$Season = as.factor(olympic_tidy_data$Season)
+```
+```{r, echo = TRUE}
+unique(olympic_tidy_data$Medal)
+```
+```{r}
+olympic_tidy_data$Medal = as.factor(olympic_tidy_data$Medal)
+```
+Let's change 'Height' to numeric
+```{r}
+olympic_tidy_data$Height = as.numeric(olympic_tidy_data$Height)
+```
+Let's look at the summary of the data we have now
+```{r, echo = TRUE}
+summary(olympic_tidy_data)
+```
+I saved this data
+```{r}
+write.csv(olympic_tidy_data, file = "~/data/olympic_tidy_data.csv")
+```
+## 3. Finding out the age of the youngest athletes of both sexes at the 1992 Olympics
+```{r, echo = TRUE}
+library(dplyr)
+young = olympic_tidy_data %>% 
+  filter(Year == 1992) %>% 
+  group_by(Sex) %>% 
+  slice_min(order_by = Age)
+select(young, Name, Sex, Age)
+```
+We see, the youngest male is 11, the youngest female is 12
+
+## 4. Calculating the mean and standard deviation of the Height variable for athletes of each gender
+```{r, echo = TRUE}
+olympic_tidy_data %>% 
+  group_by(Sex) %>% 
+  summarise(mean = mean(Height, na.rm = TRUE), sd = sd(Height, na.rm = TRUE))
+```
+## 5. Calculating the average value and standard deviation of the Height variable for female tennis players (sex = F) at the 2000 Olympics
+```{r, echo = TRUE}
+olympic_tidy_data %>% 
+  filter(Sex == "F" & Sport == "Tennis" & Year == 2000) %>%
+    summarise(mean = round(mean(Height, na.rm = TRUE), 1), sd = round(sd(Height, na.rm = TRUE), 1))
+```
+## 6. What kind of sport did the heaviest athlete participate in at the 2006 Olympics?
+```{r, echo = TRUE}
+the_haviest = olympic_tidy_data %>% 
+  filter(Year == 2006) %>% 
+  slice_max(order_by = Weight)
+the_haviest$Sport
+```
+## 7. How many gold medals were received by women from 1980 to 2010?
+```{r, echo = TRUE}
+olympic_tidy_data %>% 
+  filter(Year %in% c(1980:2010) & Sex == 'F' & Medal == "Gold") %>%
+  nrow()
+```
+## 8. How many times did John Aalberg participate in Olympiad?
+```{r, echo = TRUE}
+olympic_tidy_data %>% 
+  filter(Name == "John Aalberg") %>%
+  nrow()
+```
