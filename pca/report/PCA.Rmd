@@ -1,0 +1,199 @@
+---
+title: "PCA"
+author: "Ekaterina_Kravchuk"
+date: "06 12 2021"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(grid)
+library(ggpubr)
+library(kernlab)
+theme_set(theme_bw())
+```
+
+# 1. Data description 
+
+There are two files: (1) train.csv contains 81 features extracted from 21263 superconductors along with the critical temperature in the 82nd column, (2) unique_m.csv contains the chemical formula broken up for all the 21263 superconductors from the train.csv file. The last two columns have the critical temperature and chemical formula. The original data comes from https://supercon.nims.go.jp/en/ which is public. The goal here is to predict the critical temperature based on the features extracted.
+
+## 1.1. Data preprocessing
+
+The data is saved in csv format and requires preprocessing
+
+```{r 1}
+unique_m <- read.csv("~/data/unique_m.csv")
+train <-read.csv("~/data/train.csv")
+unique_m$material <- NULL
+data <- cbind(unique_m, train)
+write.csv(data, file = "~/data/pca_data.csv")
+```
+I saved the data to ~/data/pca_data.csv <br>
+## 1.2. Data structure
+We work with 21263 observations of 169 variables
+```{r 2}
+str(data)
+```
+## 1.3. Dividind the data into training and test samples
+```{r 3}
+smp_size <- floor(0.8 * nrow(data))
+set.seed(8)
+train_ind <- sample(seq_len(nrow(data)), size = smp_size)
+
+train_data <- data[train_ind, ]
+test_data <- data[-train_ind, ]
+```
+## 1.4. Standartization
+Standartization of the train data
+```{r 4}
+st_train_data <- as.data.frame(scale(train_data, center=TRUE, scale = TRUE))
+st_train_data$critical_temp <- train_data$critical_temp
+```
+Finding mean and sd column-wise of training data
+```{r 5}
+trainMean <- apply(train_data,2,mean)
+trainSd <- apply(train_data,2,sd)
+```
+Standartization of test data
+```{r 6}
+st_test_data <- sweep(sweep(test_data, 2L, trainMean), 2, trainSd, "/")
+st_test_data$critical_temp <- test_data$critical_temp
+```
+```{r 7}
+st_train_data = rapply( st_train_data, f=function(x) ifelse(is.nan(x),0,x), how="replace" )
+st_test_data = rapply( st_test_data, f=function(x) ifelse(is.nan(x),0,x), how="replace" )
+```
+# 2. Linear model: critical temperature prediction
+# 2.1. Creating the model
+```{r 8}
+model1 <- lm(critical_temp ~ ., data = st_train_data, na.action = "na.exclude")
+```
+```{r 9}
+summary(model1)
+```
+Adjusted R-squared on train data is 0.7628 <br>
+
+## 2.2. Using the model to predict critical temperature using test dataset
+Let's make prediction using test data
+```{r 10}
+prediction <- predict(model1, st_test_data)
+```
+Is the prediction good?
+```{r 11}
+cor(prediction, st_test_data$critical_temp)
+```
+```{r 12}
+SS.total      <- sum((st_test_data$critical_temp - mean(st_test_data$critical_temp))^2)
+SS.residual   <- sum((st_test_data$critical_temp - prediction)^2)
+SS.regression <- sum((prediction - mean(st_test_data$critical_temp))^2)
+SS.total <- (SS.regression+SS.residual)
+test.rsq <- 1 - SS.residual/SS.total  
+test.adj_rsq <- 1 - (1 - test.rsq)*(nrow(st_test_data)-1)/(nrow(st_test_data)-ncol(st_test_data))
+test.adj_rsq
+```
+adjusted R-squared for test data is 0.5578793
+The prediction does not meet our expectations. What should be done? Let's use PCA <br>
+
+# 3. PCA <br>
+## 3.1. Performing PCA
+```{r 13}
+st_test_x <- st_test_data
+st_test_x$critical_temp <- NULL
+pca <- rda(st_test_x, scale = TRUE)
+```
+```{r 14}
+head(summary(pca))
+```
+```{r 15}
+eigenvals(pca)
+```
+```{r 16}
+screeplot(pca, type = "lines", bstick = TRUE)
+```
+<br>
+
+## 3.2 Choosing PCs <br>
+I decided to choose 6 PCs
+```{r 17}
+my_matrix <- as.data.frame(summary(pca)$species[,1:6])
+new_train <- as.data.frame(as.matrix(st_train_data[,-82]) %*% as.matrix(my_matrix))
+train_crit_t <- train_data$critical_temp
+new_train <- cbind(new_train, train_crit_t)
+st_test_x <- st_test_data
+st_test_x$critical_temp <- NULL
+new_test <- as.data.frame(as.matrix(st_test_data[,-82]) %*% as.matrix(my_matrix))
+test_crit_t <- test_data$critical_temp
+new_test <- cbind(new_test, test_crit_t)
+```
+
+# 4. Linear model: critical temperature prediction after PCA
+## 4.1. Creating the model
+```{r 18}
+model2 <- lm(train_crit_t~., data=new_train)
+summary(model2)
+```
+Adjusted R-squared:      0.5892 <br>
+
+## 4.2. Using the model to predict critical temperature using test dataset
+Let's make prediction using test data
+```{r 19}
+prediction2 <- predict(model2, new_test)
+```
+Is the prediction good?
+```{r 20}
+cor(prediction2, new_test$test_crit_t)
+```
+0.7691765 is better
+```{r 21}
+SS.total2      <- sum((new_test$test_crit_t - mean(new_test$test_crit_t))^2)
+SS.residual2   <- sum((new_test$test_crit_t - prediction2)^2)
+SS.regression2 <- sum((prediction2 - mean(new_test$test_crit_t))^2)
+SS.total2 <- (SS.regression2+SS.residual2)
+test.rsq2 <- 1 - SS.residual2/SS.total2  
+test.adj_rsq2 <- 1 - (1 - test.rsq2)*(nrow(new_test)-1)/(nrow(new_test)-ncol(new_test))
+test.adj_rsq2
+```
+0.5947884 is better. PCA helped to improve the model <br>
+
+# 5. Kernel PCA
+## 5.1. Performing kernel PCA
+```{r 22}
+kernel_pca <- kpca(st_train_data[,-82])
+```
+```{r 23}
+kernel_matrix <- as.data.frame(kernel_pca@pcv)[, 1:6]
+kernel_train <- as.data.frame(as.matrix(st_train_data[,-82]) %*% as.matrix(kernel_matrix))
+kernel_test <- cbind(kernel_train, train_crit_t)
+kernel_test <- as.data.frame(as.matrix(st_test_data[,-82]) %*% as.matrix(kernel_matrix))
+kernel_test <- cbind(kernel_test, test_crit_t)
+```
+
+## 5.2. Linear model: critical temperature prediction after kernel PCA
+```{r 24}
+model3 <- lm(train_crit_t~., data=kernel_train)
+summary(model3)
+```
+Adjusted R-squared:      1 
+```{r 25}
+prediction3 <- predict(model3, kernel_test)
+```
+
+```{r 26}
+cor(prediction3, kernel_test$test_crit_t)
+```
+0.8068682 is much more better
+```{r 27}
+SS.total3      <- sum((kernel_test$test_crit_t - mean(kernel_test$test_crit_t))^2)
+SS.residual3   <- sum((kernel_test$test_crit_t - prediction3)^2)
+SS.regression3 <- sum((prediction3 - mean(kernel_test$test_crit_t))^2)
+SS.total3 <- (SS.regression3+SS.residual3)
+test.rsq3 <- 1 - SS.residual3/SS.total3  
+test.adj_rsq3 <- 1 - (1 - test.rsq3)*(nrow(kernel_test)-1)/(nrow(kernel_test)-ncol(kernel_test))
+test.adj_rsq3
+```
+0.7396694 is much more better
